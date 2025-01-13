@@ -9,25 +9,28 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 import time
+from tensorflow.keras.optimizers import Adam
 
 # Załaduj dane MNIST
 (x_train_data, y_train_data), (x_test_data, y_test_data) = mnist.load_data()
 
-# Normalizacja danych
+# Normalizacja pikseli obrazów do zakresu [0, 1], co przyspiesza i stabilizuje proces uczenia.
 x_train_data = x_train_data.astype('float32') / 255.
 x_test_data = x_test_data.astype('float32') / 255.
 
-# Spłaszczenie obrazów
+## Spłaszczenie obrazów 28x28 do jednowymiarowych wektorów o długości 784 (28*28), aby pasowały do modeli.
 x_train_data = x_train_data.reshape((len(x_train_data), np.prod(x_train_data.shape[1:])))
 x_test_data = x_test_data.reshape((len(x_test_data), np.prod(x_test_data.shape[1:])))
 
 # --- SVD ---
-# Zastosowanie TruncatedSVD do redukcji wymiarowości
+# Zastosowanie TruncatedSVD do redukcji wymiarowości; Redukcja do 64 wymiarów przy zachowaniu maksymalnej ilości informacji.
 svd_model = TruncatedSVD(n_components=64)
 x_train_svd = svd_model.fit_transform(x_train_data)
 x_test_svd = svd_model.transform(x_test_data)
 
-# Trenowanie klasyfikatora regresji logistycznej
+# Trenowanie regresji logistycznej na danych zredukowanych za pomocą SVD.
+# - max_iter=5000: większa liczba iteracji dla lepszej konwergencji.
+# - Przewidywanie etykiet dla danych testowych.
 svd_classifier = LogisticRegression(max_iter=5000)
 svd_classifier.fit(x_train_svd, y_train_data)
 y_pred_svd = svd_classifier.predict(x_test_svd)
@@ -36,28 +39,39 @@ svd_accuracy = accuracy_score(y_test_data, y_pred_svd)
 print(f"Accuracy using SVD: {svd_accuracy:.4f}")
 
 # --- Autoencoder ---
-# Tworzenie enkodera
+# Definicja części autoenkodera odpowiedzialnej za kodowanie:
+# - Warstwa wejściowa: wektor o długości 784,
+# - Warstwa ukryta: redukcja do 64 wymiarów z funkcją aktywacji ReLU.
 input_layer = Input(shape=(784,))
 encoded_layer = Dense(64, activation='relu')(input_layer)
 encoder_model = Model(input_layer, encoded_layer)
 
-# Tworzenie dekodera
+# Definicja części autoenkodera odpowiedzialnej za dekodowanie:
+# - Warstwa wejściowa: wektor o długości 64,
+# - Warstwa wyjściowa: rekonstrukcja oryginalnego obrazu (784 wartości) z funkcją sigmoidalną.
 decoder_input = Input(shape=(64,))
 decoded_layer = Dense(784, activation='sigmoid')(decoder_input)
 decoder_model = Model(decoder_input, decoded_layer)
 
-# Tworzenie autoenkodera
+# Łączenie enkodera i dekodera w pełny autoenkoder.
 autoencoder_model = Model(input_layer, decoder_model(encoder_model(input_layer)))
 
-# Kompilowanie autoenkodera
-autoencoder_model.compile(optimizer='adam', loss='mean_squared_error')
+# Kompilowanie autoenkodera:
+# - Optymalizator Adam: szybka i efektywna optymalizacja,
+# - Funkcja straty: średni błąd kwadratowy (rekonstrukcja obrazów).
+
+custom_optimizer = Adam(learning_rate=0.001)
+
+autoencoder_model.compile(optimizer=custom_optimizer, loss='mean_squared_error')
 
 # Listy do przechowywania wartości strat
 train_losses = []
 validation_losses = []
 
-# Pętla treningowa, która zbiera straty dla treningu i walidacji
-for epoch_num in range(25):
+epoch_count = 45
+
+# Pętla treningowa, która zbiera straty dla treningu i walidacji przez 25 epok
+for epoch_num in range(epoch_count):
     start_time = time.time()  # Rozpoczęcie liczenia czasu epoki
 
     # Trenowanie modelu przez jedną epokę
@@ -78,7 +92,7 @@ for epoch_num in range(25):
     epoch_time = time.time() - start_time  # Czas trwania epoki
 
     # Wyświetlanie postępu
-    print(f"Epoch {epoch_num + 1}/25  time: {epoch_time:.2f}s  training loss: {train_loss:.4f}  test loss: {val_loss:.4f}")
+    print(f"Epoch {epoch_num + 1}/{epoch_count}  time: {epoch_time:.2f}s  training loss: {train_loss:.4f}  test loss: {val_loss:.4f}")
 
 # Pobranie zakodowanej reprezentacji danych testowych
 encoded_train_data = encoder_model.predict(x_train_data)
@@ -116,14 +130,14 @@ num_wrong_examples = 5
 for i in range(min(num_wrong_examples, len(wrong_predictions))):
     # Indeks błędnie sklasyfikowanego obrazu
     idx = wrong_predictions[i]
-    
+
     # Pobranie obrazu
     img = x_test_data[idx]
-    
+
     # Pobranie prawdziwej i przewidywanej etykiety
     true_label = y_test_data[idx]
     predicted_label = y_pred_autoencoder[idx]
-    
+
     # Wyświetlenie obrazu
     plt.figure(figsize=(3, 3))
     plt.imshow(img.reshape(28, 28), cmap='gray')
